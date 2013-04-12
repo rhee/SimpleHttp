@@ -174,7 +174,7 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
         }
     }
 
-    public void get(String params,final SimpleHttpCallback callback) /*throws IOException*/ {
+    public SimpleHttp get(String params,final SimpleHttpCallback callback) /*throws IOException*/ {
 
         this.do_post=false;
         this.http_params_raw=params;
@@ -189,18 +189,20 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
 
         super.execute();
 
+        return this;
+
     }
 
     public void get(Map<String,String>params,final SimpleHttpCallback callback) /*throws IOException*/ {
-        get(mapToString(params),callback);
+        return get(mapToString(params),callback);
     }
 
     public void get(String[]params,final SimpleHttpCallback callback) /*throws IOException*/ {
-        get(stringsToString(params),callback);
+        return get(stringsToString(params),callback);
     }
 
     public void get(final SimpleHttpCallback callback) /* throws IOException */ {
-        get("",callback);
+        return get("",callback);
     }
 
     public void post(String params,final SimpleHttpCallback callback) /*throws IOException*/ {
@@ -218,18 +220,20 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
 
         super.execute();
 
+        return this;
+
     }
 
     public void post(Map<String,String>params,final SimpleHttpCallback callback) /*throws IOException*/ {
-        post(mapToString(params),callback);
+        return post(mapToString(params),callback);
     }
 
     public void post(String[]params,final SimpleHttpCallback callback) /*throws IOException*/ {
-        post(stringsToString(params),callback);
+        return post(stringsToString(params),callback);
     }
 
     public void post(final SimpleHttpCallback callback) /*throws IOException*/ {
-        post("",callback);
+        return post("",callback);
     }
 
     //////////////////////////////////////////////////////
