@@ -14,7 +14,6 @@ import java.net.URLEncoder;
 import java.security.SecureRandom;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
-import java.util.HashMap;
 import java.util.Map;
 
 import javax.net.ssl.HostnameVerifier;
@@ -43,55 +42,17 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
     protected String http_url;	//request url
     protected String http_params_raw;
 
-    protected Throwable http_error;
     protected int http_status;
     protected long http_server_time;
     protected String http_response;
 
-    private SimpleHttpCallbackWrapper http_callback;
+    private Runnable http_callback;
 
     public interface SimpleHttpCallback {
         public abstract void onHttpOk(SimpleHttp task,int status,long server_time,String response);
         public abstract void onHttpError(SimpleHttp task,Throwable error,int status,String response);
     }
 
-
-    private class SimpleHttpCallbackWrapper {
-
-        protected SimpleHttp task;
-        protected SimpleHttpCallback callback;
-
-        /* subclass can access response using this methods */
-        protected final Throwable getError(){return task.http_error; }  
-        protected final int getStatus(){return task.http_status;}
-        protected final long getServerTime(){return task.http_server_time;}
-        protected final String getResponse(){return task.http_response;}
-
-        public SimpleHttpCallbackWrapper(SimpleHttp task,SimpleHttpCallback callback) {
-            this.task=task;
-            this.callback=callback;
-        }
-
-        private Map<String,String> getResponseFormURLAsMap() {
-            HashMap<String,String> map=new HashMap<String,String>();
-            if(null!=getResponse()&&0<getResponse().length()){
-                for(String kv : getResponse().split("&")){
-                    String[] s = kv.split("=");//Log.v(LOG_TAG,"Http.getResponseFormURLAsMap: k="+s[0]+", v="+s[1]);
-                    map.put(s[0],s[1]);
-                }
-            }
-            return map;
-        }
-
-        public void run() {
-            if(null==getError()&&(200==getStatus())) {
-                if(null!=callback)callback.onHttpOk(this.task,getStatus(),getServerTime(),getResponse());
-            }else{
-                if(null!=callback)callback.onHttpError(this.task,getError(),getStatus(),getResponse());
-            }
-        }
-
-    }
 
     public SimpleHttp(String url,String params){
         super();
@@ -130,7 +91,7 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
                 con.setInstanceFollowRedirects(true);
 
                 if(this.do_post){
-                    con.setDoOutput(true);
+                    con.setDoOutput(true);	//XXX FIXME cause FileNotFound in ICS (API-16 <), when using post(String[],...) or post(Map,...)
                     if(this.do_chunked){        
                         con.setChunkedStreamingMode(0);
                     }else{
@@ -181,67 +142,61 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
         }
     }
 
-    public void get(String params,final SimpleHttpCallback callback) /*throws IOException*/ {
-
-        this.do_post=false;
+    private void execute(String params,final SimpleHttpCallback callback){
         this.http_params_raw=params;
-        this.http_error=null;
         this.http_status=0;	//(re-)initalize
         this.http_server_time=0;
         this.http_response=null;
-
-        this.http_callback=new SimpleHttpCallbackWrapper(this,callback);
-
-        Log.v(LOG_TAG,"Http.execute: url=\""+http_url+"\", params=\""+http_params_raw+"\"");
-
+	this.http_callback=new Runnable(){
+            @Override
+            public void run() {
+                if(200==http_status) {
+                    if(null!=callback)callback.onHttpOk(SimpleHttp.this,http_status,http_server_time,http_response);
+                }else{
+                    if(null!=callback)callback.onHttpError(SimpleHttp.this,null,http_status,http_response);
+                }
+            }
+        };
+        Log.v(LOG_TAG,"SimpleHttp.execute: url=\""+http_url+"\", params=\""+http_params_raw+"\"");
         super.execute();
-
     }
 
-    public void get(Map<String,String>params,final SimpleHttpCallback callback) /*throws IOException*/ {
+    public void get(String params,SimpleHttpCallback callback) /*throws IOException*/ {
+        execute(params,callback);
+    }
+
+    public void get(Map<String,String>params,SimpleHttpCallback callback) /*throws IOException*/ {
         get(mapToString(params),callback);
     }
 
-    public void get(String[]params,final SimpleHttpCallback callback) /*throws IOException*/ {
+    public void get(String[]params,SimpleHttpCallback callback) /*throws IOException*/ {
         get(stringsToString(params),callback);
     }
 
-    public void get(final SimpleHttpCallback callback) /* throws IOException */ {
+    public void get(SimpleHttpCallback callback) /* throws IOException */ {
         get("",callback);
     }
 
-    public void post(String params,final SimpleHttpCallback callback,boolean do_chunked) /*throws IOException*/ {
-
+    public void post(String params,SimpleHttpCallback callback,boolean do_chunked) /*throws IOException*/ {
         this.do_post=true;
         this.do_chunked=do_chunked;
-        this.http_params_raw=params;
-        this.http_error=null;
-        this.http_status=0;	//(re-)initalize
-        this.http_server_time=0;
-        this.http_response=null;
-
-        this.http_callback=new SimpleHttpCallbackWrapper(this,callback);
-
-        Log.v(LOG_TAG,"Http.execute: url=\""+http_url+"\", params=\""+http_params_raw+"\"");
-
-        super.execute();
-
+        execute(params,callback);
     }
 
-    public void post(String params,final SimpleHttpCallback callback) /*throws IOException*/ {
+    public void post(String params,SimpleHttpCallback callback) /*throws IOException*/ {
         post(params,callback,false);
     }
 
-    public void post(final SimpleHttpCallback callback) /*throws IOException*/ {
+    public void post(SimpleHttpCallback callback) /*throws IOException*/ {
         post("",callback,false);
     }
 
-    public void post(Map<String,String>params,final SimpleHttpCallback callback) /*throws IOException*/ {
-        post(mapToString(params),callback,true);
+    public void post(Map<String,String>params,SimpleHttpCallback callback) /*throws IOException*/ {
+        post(mapToString(params),callback,false);
     }
 
-    public void post(String[]params,final SimpleHttpCallback callback) /*throws IOException*/ {
-        post(stringsToString(params),callback,true);
+    public void post(String[]params,SimpleHttpCallback callback) /*throws IOException*/ {
+        post(stringsToString(params),callback,false);
     }
 
     //////////////////////////////////////////////////////
@@ -336,4 +291,56 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
     }
 
 }
+
+
+/* Example:
+
+import org.json.JSONObject;
+import org.json.JSONArray;
+import org.json.JSONException;
+
+        try {
+
+            String request=new JSONObject()
+                .put("key","value")
+                .put("list",new JSONArray()
+                            .put(new JSONObject()
+                                    .put("k1","v1"))
+                            .put(new JSONObject()
+                                    .put("k2","v2")))
+                .toString();
+
+            SimpleHttp h = new SimpleHttp("http://your.server.name/your/api/path/");
+            h.post(request,new SimpleHttp.SimpleHttpCallback(){
+                @Override
+                public void onHttpOk(SimpleHttp task,int status,long server_time,String response){
+
+                    try {
+                        JSONObject json=new JSONObject(response);
+                        String result=json.getString("result");
+
+                        // valid response. do use response/result
+
+                        return; //success
+                    }catch(JSONException e){
+                        Log.e("TEST",e);
+                    }
+
+                    // do other thing on http ok but invalid resopnse
+
+                }
+                @Override
+                public void onHttpError(SimpleHttp task,Throwable error,int status,String response){
+                    Log.d("TEST","onHttpError: "+status+" "+response);
+
+                    // do something for http error
+
+                }
+            });
+
+        }catch(JSONException e){
+            Log.e(e);
+        }
+
+*/
 
