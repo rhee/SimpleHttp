@@ -293,7 +293,7 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
 }
 
 
-/* Example:
+/* Example 1:
 
 import org.json.JSONObject;
 import org.json.JSONArray;
@@ -341,6 +341,23 @@ import org.json.JSONException;
         }catch(JSONException e){
             Log.e(e);
         }
+
+*/
+
+/* Example 2:
+
+    SimpleHttp h = new SimpleHttp("http://your.server.name/your/api/path/");
+    h.post(new String[]{"key1","value1","key2","value2"},new SimpleHttp.SimpleHttpCallback(){
+	@Override
+	public void onHttpOk(SimpleHttp task,int status,long server_time,String response){
+	    // check 'response' validity and do whatever
+	}
+	@Override
+	public void onHttpError(SimpleHttp task,Throwable error,int status,String response){
+	    Log.d("TEST","onHttpError: "+status+" "+response);
+	    // do something for http error
+	}
+    });
 
 */
 
