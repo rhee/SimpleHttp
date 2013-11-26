@@ -8,8 +8,10 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
+import java.lang.reflect.Field;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
+import java.net.Socket;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.security.SecureRandom;
@@ -21,6 +23,8 @@ import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSession;
 import javax.net.ssl.X509TrustManager;
+
+import org.apache.http.client.HttpClient;
 
 import android.content.Context;
 import android.os.AsyncTask;
@@ -91,6 +95,8 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
 
 		Thread.currentThread().setName("SimpleHttp"+SimpleHttp.incr());
 		
+		HttpURLConnection con = null;
+		
 		try {
 
 			String url=http_url;
@@ -101,7 +107,7 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
 					url+="?"+this.http_params_built;
 			}
 
-			HttpURLConnection con=(HttpURLConnection)(new URL(url)).openConnection();
+			con=(HttpURLConnection)(new URL(url)).openConnection();
 
 			try{
 
@@ -194,6 +200,7 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
 				BufferedReader in;
 				
 				if(http_status>=400) {
+					Log.e(TAG,"HttpUrlConnection server error: "+http_status+" server: "+getConnectionServerAddr(con));
 					in = new BufferedReader(new InputStreamReader(con.getErrorStream()));
 				} else {
 					in = new BufferedReader(new InputStreamReader(con.getInputStream()));
@@ -215,7 +222,7 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
 			Log.e(TAG,"HttpUrlConnection error",e);
 			return e;
 		}catch(IOException e){
-			Log.e(TAG,"HttpUrlConnection error",e);
+			Log.e(TAG,"HttpUrlConnection error: "+e+" server: "+getConnectionServerAddr(con));
 			return e;
 		}
 		return null;
@@ -318,6 +325,37 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
 		this.do_post=true;
 		execute("",params,fileKey,fileName,fileStream,callback);
 	}
+
+	//////////////////////////////////////////////////////
+	
+	private static String getConnectionServerAddr(HttpURLConnection con) {
+		if (null != con) {
+			try {
+				Field field;
+				field = con.getClass().getDeclaredField("http");
+				field.setAccessible(true);
+				HttpClient http = (HttpClient) field.get(con);
+				field = HttpClient.class.getDeclaredField("serverSocket");
+				field.setAccessible(true);
+				Socket socket = (Socket) field.get(http);
+				return socket.getInetAddress().getHostAddress();
+			} catch (SecurityException e1) {
+				// TODO Auto-generated catch block
+				//e1.printStackTrace();
+			} catch (NoSuchFieldException e1) {
+				// TODO Auto-generated catch block
+				//e1.printStackTrace();
+			} catch (IllegalArgumentException e1) {
+				// TODO Auto-generated catch block
+				//e1.printStackTrace();
+			} catch (IllegalAccessException e1) {
+				// TODO Auto-generated catch block
+				//e1.printStackTrace();
+			}
+		}
+		return "";
+	}
+
 
 	//////////////////////////////////////////////////////
 	//////////////////////////////////////////////////////
