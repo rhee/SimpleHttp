@@ -10,7 +10,7 @@ import android.util.Base64;
 public class SimpleCompression {
 
 	private static final String TAG="SimpleCompression";
-	
+
 	//import java.io.ByteArrayOutputStream;
 	//import java.util.zip.Deflater;
 	//import android.util.Base64;
@@ -38,7 +38,7 @@ public class SimpleCompression {
 	}
 
 	public static String parseCompressedString(int decompressedByteCount,byte[] compressedBytes) {
-		
+
 		//Log.d(TAG,"=== parseCompressedString: "+decompressedByteCount+", "+compressedBytes.length);
 
 		String result="";

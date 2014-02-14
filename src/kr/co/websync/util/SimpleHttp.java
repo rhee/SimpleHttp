@@ -10,6 +10,7 @@ import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Field;
 import java.net.HttpURLConnection;
+import java.net.InetAddress;
 import java.net.MalformedURLException;
 import java.net.Socket;
 import java.net.URL;
@@ -29,6 +30,9 @@ import org.apache.http.client.HttpClient;
 import android.content.Context;
 import android.os.AsyncTask;
 import android.os.Build;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.Looper;
 import android.os.SystemClock;
 
 public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
@@ -41,19 +45,47 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
 		disableConnectionReuseIfNecessary();// android-specific
 	}
 
-	protected boolean do_post=false;
-	protected String http_url=null;	//request url
-	protected String[] http_params=null;
-	protected String http_file_key=null;
-	protected String http_file_name=null;
-	protected InputStream http_file_stream=null;
-	protected String http_params_built=""; //pre-built param string ( direct JSON send )
+	private static class ConnectionThread extends HandlerThread
+	{
 
-	protected int http_status;
-	protected long http_server_time;
-	protected String http_response;
+		private static Object gLock = new Object();
+		private static ConnectionThread gInstance;
+		private static Handler gHandler;
+
+		private ConnectionThread(String name) {
+			super(name);
+		}
+
+		public static Handler getHandler()
+		{
+			synchronized(gLock){
+				if(null==gHandler){
+					if(null==gInstance){
+						gInstance = new ConnectionThread("SimpleHttpConnection");
+						gInstance.start();
+					}
+					gHandler=new Handler(gInstance.getLooper());
+				}
+				return gHandler;
+			}
+		}
+
+	}
+
+	private boolean do_post=false;
+	private String http_url=null;	//request url
+	private String[] http_params=null;
+	private String http_file_key=null;
+	private String http_file_name=null;
+	private InputStream http_file_stream=null;
+	private String http_params_built=""; //pre-built param string ( direct JSON send )
+
+	private int http_status;
+	private long http_server_time;
+	private String http_response;
 
 	private Runnable http_callback=null;
+	private Looper originLooper;
 
 	public interface SimpleHttpCallback {
 		public abstract void onHttpOk(SimpleHttp task,int status,long server_time,String response);
@@ -65,38 +97,22 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
 		this.http_url=url;
 	}
 
-	public SimpleHttp(String url,String[]params){
+	public SimpleHttp(String url,Context context){
 		super();
 		this.http_url=url;
-		this.http_params=params;
-	}
-
-	public SimpleHttp(String url,String params){
-		super();
-		this.http_url=url;
-		this.http_params_built=params;
-	}
-
-	public SimpleHttp(String url,String[]params,String fileKey,String fileName,InputStream fileStream){
-		super();
-		this.http_url=url;
-		this.http_params = params;
-		this.http_file_key = fileKey;
-		this.http_file_name = fileName;
-		this.http_file_stream = fileStream;
 	}
 
 	public long getLastServerTime(){
 		return http_server_time;
 	}
-	
+
 	@Override
 	protected Throwable doInBackground(String... requests){
 
 		Thread.currentThread().setName("SimpleHttp"+SimpleHttp.incr());
-		
+
 		HttpURLConnection con = null;
-		
+
 		try {
 
 			String url=http_url;
@@ -198,14 +214,14 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
 
 				StringBuffer buf=new StringBuffer();
 				BufferedReader in;
-				
+
 				if(http_status>=400) {
-					Log.e(TAG,"HttpUrlConnection server error: "+http_status+" server: "+getConnectionServerAddr(con));
 					in = new BufferedReader(new InputStreamReader(con.getErrorStream()));
+					Log.e(TAG,"HttpUrlConnection server error: "+http_status+" server: "+getConnectionServerAddr(con));
 				} else {
 					in = new BufferedReader(new InputStreamReader(con.getInputStream()));
 				}
-				
+
 				String line=null;
 				while(null!=(line=in.readLine())){
 					buf.append(line);//.append("\n");
@@ -239,12 +255,17 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
 
 	@Override
 	protected void onPostExecute(Throwable error){
-//		if(null==error){
-//			Log.v(TAG,""+http_server_time+","+http_url+","+http_status+","+http_response);
-//			//new Throwable().printStackTrace();
-//		}
+		//		if(null==error){
+		//			Log.v(TAG,""+http_server_time+","+http_url+","+http_status+","+http_response);
+		//			//new Throwable().printStackTrace();
+		//		}
 		if(null!=http_callback){
-			http_callback.run();
+			if(null==originLooper){
+				http_callback.run();
+			}else{
+				new Handler(originLooper).post(http_callback);
+				originLooper=null;
+			}
 		}
 	}
 
@@ -266,14 +287,14 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
 				if(null!=callback){
 
 					if(200==http_status) {
-//						try {
-							callback.onHttpOk(SimpleHttp.this,http_status,http_server_time,http_response);
-							return;
-//						}catch(Exception e){
-//							Log.e(TAG,"Error: "+e.getMessage());
-//							callback.onHttpError(SimpleHttp.this,e,http_status,http_response);
-//							return;
-//						}
+						//						try {
+						callback.onHttpOk(SimpleHttp.this,http_status,http_server_time,http_response);
+						return;
+						//						}catch(Exception e){
+						//							Log.e(TAG,"Error: "+e.getMessage());
+						//							callback.onHttpError(SimpleHttp.this,e,http_status,http_response);
+						//							return;
+						//						}
 					}else{
 						Throwable t = new RuntimeException("HTTP error status="+http_status);
 						callback.onHttpError(SimpleHttp.this,t,http_status,http_response);
@@ -286,72 +307,86 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
 		super.execute();
 	}
 
+	private void executeWrapper(final String params_built,final String[] params,final String fileKey,final String fileName,final InputStream fileStream,final SimpleHttpCallback callback)
+	{
+		if(Looper.myLooper()==Looper.getMainLooper()) {
+			this.originLooper = Looper.myLooper();
+			ConnectionThread.getHandler().post(new Runnable(){
+				@Override
+				public void run() {
+					execute(params_built,params,fileKey,fileName,fileStream,callback);
+				}});
+		}else{
+			execute(params_built,params,fileKey,fileName,fileStream,callback);
+		}
+	}
+
 	public void get(String params,SimpleHttpCallback callback) /*throws IOException*/ {
 		this.do_post=false;
-		execute(params,null,null,null,null,callback);
+		executeWrapper(params,null,null,null,null,callback);
 	}
 
 	public void get(String[]params,SimpleHttpCallback callback) /*throws IOException*/ {
 		this.do_post=false;
-		execute(stringsToStringUrlEncoded("",params),null,null,null,null,callback);
+		executeWrapper(stringsToStringUrlEncoded("",params),null,null,null,null,callback);
 	}
 
 	public void get(SimpleHttpCallback callback) /* throws IOException */ {
 		this.do_post=false;
-		execute("",null,null,null,null,callback);
+		executeWrapper("",null,null,null,null,callback);
 	}
 
 	public void post(SimpleHttpCallback callback) /*throws IOException*/ {
 		this.do_post=true;
-		execute("",null,null,null,null,callback);
+		executeWrapper("",null,null,null,null,callback);
 	}
 
 	public void post(String params,SimpleHttpCallback callback) /*throws IOException*/ {
 		this.do_post=true;
-		execute(params,null,null,null,null,callback);
+		executeWrapper(params,null,null,null,null,callback);
 	}
 
 	public void post(String[]params,SimpleHttpCallback callback) /*throws IOException*/ {
 		this.do_post=true;
-		execute("",params,null,null,null,callback);
+		executeWrapper("",params,null,null,null,callback);
 	}
 
 	public void post(String fileKey,String fileName,InputStream fileStream,SimpleHttpCallback callback) /*throws IOException*/ {
 		this.do_post=true;
-		execute("",null,fileKey,fileName,fileStream,callback);
+		executeWrapper("",null,fileKey,fileName,fileStream,callback);
 	}
 
 	public void post(String[]params,String fileKey,String fileName,InputStream fileStream,SimpleHttpCallback callback) /*throws IOException*/ {
 		this.do_post=true;
-		execute("",params,fileKey,fileName,fileStream,callback);
+		executeWrapper("",params,fileKey,fileName,fileStream,callback);
 	}
 
 	//////////////////////////////////////////////////////
-	
+
 	private static String getConnectionServerAddr(HttpURLConnection con) {
 		if (null != con) {
 			try {
-				Field field;
-				field = con.getClass().getDeclaredField("http");
-				field.setAccessible(true);
-				HttpClient http = (HttpClient) field.get(con);
-				field = HttpClient.class.getDeclaredField("serverSocket");
-				field.setAccessible(true);
-				Socket socket = (Socket) field.get(http);
-				return socket.getInetAddress().getHostAddress();
-			} catch (SecurityException e1) {
-				// TODO Auto-generated catch block
-				//e1.printStackTrace();
-			} catch (NoSuchFieldException e1) {
-				// TODO Auto-generated catch block
-				//e1.printStackTrace();
-			} catch (IllegalArgumentException e1) {
-				// TODO Auto-generated catch block
-				//e1.printStackTrace();
-			} catch (IllegalAccessException e1) {
-				// TODO Auto-generated catch block
-				//e1.printStackTrace();
+				URL url = con.getURL();
+				Log.d(TAG,"final URL: "+url);
+				String host = url.getHost();
+				InetAddress address = InetAddress.getByName(host);
+				String ip = address.getHostAddress();
+				return ip;
+			}catch(Exception e) { //SecurityException, NoSuchFieldException, IllegalArgumentException, IllegalAccessExeption 
+				Log.d(TAG, "Exception: "+e);
 			}
+			//try {
+			//	Field field;
+			//	field = con.getClass().getDeclaredField("http");
+			//	field.setAccessible(true);
+			//	HttpClient http = (HttpClient) field.get(con);
+			//	field = HttpClient.class.getDeclaredField("serverSocket");
+			//	field.setAccessible(true);
+			//	Socket socket = (Socket) field.get(http);
+			//	return socket.getInetAddress().getHostAddress();
+			//} catch (Exception e) { //SecurityException NoSuchFieldException IllegalArgumentException IllegalAccessException
+			//	Log.d(TAG, "Exception: "+e);
+			//}
 		}
 		return "";
 	}
@@ -374,14 +409,14 @@ public class SimpleHttp extends AsyncTask<String,Void,Throwable> {
 					.append(encoded);
 				}catch(UnsupportedEncodingException e){
 					Log.e(TAG,"Exception",e);
-                }catch(NullPointerException e){
-                    StringBuffer esb = new StringBuffer();
-                    esb.append("NullPoitnerException: params: ");
-                    esb.append(""+params[0]);
-                    for(int ii=1;ii<params.length;ii++){
-                        esb.append(", "+params[ii]);
-                    }
-                    Log.d(TAG,esb.toString());
+				}catch(NullPointerException e){
+					StringBuffer esb = new StringBuffer();
+					esb.append("NullPoitnerException: params: ");
+					esb.append(""+params[0]);
+					for(int ii=1;ii<params.length;ii++){
+						esb.append(", "+params[ii]);
+					}
+					Log.d(TAG,esb.toString());
 				}
 			}
 		}

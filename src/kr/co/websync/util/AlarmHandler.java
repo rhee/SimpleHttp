@@ -45,80 +45,89 @@ public class AlarmHandler {
 
 		private DelayedPostManager(Context context)
 		{
+			Log.d(TAG,"/// new manager context: "+oid(context));
+
 			mContext = context;
 
 			mAlarmManager = (AlarmManager)mContext.getSystemService(Context.ALARM_SERVICE);
+
 			mBroadcast = PendingIntent.getBroadcast(mContext,0,new Intent(ALARM_EVENT),0); //PendingIntent.FLAG_CANCEL_CURRENT);
+
 			mReceiver = new BroadcastReceiver() {
 				@Override
 				public void onReceive(Context context, Intent intent) {
 					String action=intent.getAction();
 					if(ALARM_EVENT.equals(action)){
-						final long now = SystemClock.elapsedRealtime();
 
 						synchronized(DelayedPostManager.this) {
 							DelayedPost next;
-							int count = 0;
+
+							long now = SystemClock.elapsedRealtime();
+
 							while ( null != (next = mPosts.peek()) && next.time <= now ) {
+								Log.d(TAG, "/// "+oid(DelayedPostManager.this)+" ALARM_EVENT: handler="+oid(next.handler)+" callback="+oid(next.callback));
 								next.handler.post(next.callback);
 								mPosts.poll();
 								mPostsMap.remove(next.callback);
-								count++;
+								now = SystemClock.elapsedRealtime();
 							}
-
-							Log.d(TAG, "/// "+hashCode()+" ALARM_EVENT: handled "+count+", rest "+mPosts.size()+"/"+now);
 
 							setNextAlarm();
 						}
 					}
 				}
 			};
-			
+
 			mContext.registerReceiver(mReceiver, new IntentFilter(ALARM_EVENT));
 		}
-		
+
 		private static Map<Context,DelayedPostManager> gInstances = new HashMap<Context,DelayedPostManager>();
 
 		public static DelayedPostManager getInstance(Context context)
 		{
-			DelayedPostManager instance = gInstances.get(context);
-			if(null==instance){
-				instance=new DelayedPostManager(context);
+			synchronized (gInstances) {
+				DelayedPostManager instance = gInstances.get(context);
+				if(null==instance){
+					instance=new DelayedPostManager(context);
+					gInstances.put(context,instance);
+				}
+				return instance;
 			}
-			return instance;
 		}
 
 		public synchronized boolean addDelayedPost(AlarmHandler handler, Runnable r, long time) {
-			//Log.d(TAG, "/// "+hashCode()+" addDelayedPost: "+time+"/"+SystemClock.elapsedRealtime());
+			//long now = SystemClock.elapsedRealtime();
 			DelayedPost post = mPostsMap.get(r);
-			
+
 			if(null==post){
+				//Log.d(TAG, "/// "+oid(this)+" add: "+oid(r)+" "+(now/1000)+"+"+((time-now)/1000)+"s");
 				post = new DelayedPost();
 			}else{
+				//Log.d(TAG, "/// "+oid(this)+" replace: "+oid(r)+" "+(now/1000)+"+"+((time-now)/1000)+"s");
 				mPosts.remove(post);
-				mPostsMap.remove(post);
+				mPostsMap.remove(r);
 			}
-			
+
 			post.handler = handler;
 			post.callback = r;
 			post.time = time;
-			
+
 			mPosts.offer(post);
-			mPostsMap.put(post.callback, post);
-			
+			mPostsMap.put(r, post);
+
 			setNextAlarm();
 			return true; 		//XXX TBD check loop is exiting or not
 		}
 
 		public synchronized void removeDelayedPost(AlarmHandler owner,Runnable r) {
-			//Log.d(TAG, "/// "+hashCode()+" removeDelayedPost: "+r);
+			//Log.d(TAG, "/// "+oid(this)+" remove: "+oid(r));
 			mPosts.remove(mPostsMap.get(r));
 			mPostsMap.remove(r);
 			setNextAlarm();
 		}
 
 		public synchronized void removeDelayedPosts(AlarmHandler owner) {
-			//Log.d(TAG, "/// "+hashCode()+" removeDelayedPosts");
+			//Log.d(TAG, "/// "+oid(this)+" remove");
 			///NOTE: should check owner //mPosts.clear();
 			{
 				Iterator<DelayedPost> it = mPosts.iterator();
@@ -140,24 +149,31 @@ public class AlarmHandler {
 
 		private void setNextAlarm()
 		{
+			long now = SystemClock.elapsedRealtime();
 			DelayedPost next = mPosts.peek();
 			if(null == next) {
-				//Log.d(TAG, "/// "+hashCode()+" setNextAlarm: count: "+mPosts.size());
+				Log.d(TAG, "/// "+oid(this)+" update: "+mPosts.size());
 			}else{
 				long time = next.time;
-				//Log.d(TAG, "/// "+hashCode()+" setNextAlarm: count: "+mPosts.size()+" "+time+"/"+SystemClock.elapsedRealtime());
+				Log.d(TAG, "/// "+oid(this)+" update: "+mPosts.size()+" "+oid(next)+" "+(now/1000)+"+"+((time-now)/1000)+"s");
 				mAlarmManager.set(
 						AlarmManager.ELAPSED_REALTIME_WAKEUP,
 						time,
 						mBroadcast);
 			}
 		}
-		
+
+		private static int oid(Object o)
+		{
+			if(null==o)return 0;
+			return o.hashCode()%100003;
+		}
+
 	}
 
 	private DelayedPostManager mManager;
 	private Handler mHandler;
-	
+
 	public AlarmHandler(Context context,Looper looper)
 	{
 		mManager = DelayedPostManager.getInstance(context);
@@ -168,12 +184,12 @@ public class AlarmHandler {
 	{
 		this(context,context.getMainLooper());
 	}
-	
+
 	public boolean post(Runnable callback)
 	{
 		return mHandler.post(callback);
 	}
-	
+
 	public boolean postAtTime(Runnable callback,long time)
 	{
 		return mManager.addDelayedPost(this,callback,time);
@@ -185,7 +201,7 @@ public class AlarmHandler {
 		long time = now + delay;
 		return mManager.addDelayedPost(this,callback,time);
 	}
-	
+
 	public void removeCallbacks(Runnable r)
 	{
 		mHandler.removeCallbacks(r);
